@@ -389,6 +389,35 @@ class GroupManager(BaseManager, ChartMixin):
 
         return views
 
+    def _get_group_view(self, group_name):
+        from sentry.models import View
+        from sentry.views import View as ViewHandler
+
+        views = set()
+        for viewhandler in ViewHandler.objects.all():
+            if not viewhandler.ref:
+                viewhandler.ref = View.objects.get_or_create(
+                    _cache=True,
+                    path=group_name,
+                    defaults=dict(
+                        verbose_name=viewhandler.verbose_name,
+                        verbose_name_plural=viewhandler.verbose_name_plural,
+                    ),
+                )[0]
+            views.add(viewhandler.ref)
+        return views
+
+    def _get_group_name_by_grouping(self, project, message, culprit):
+        from sentry.plugins import plugins
+        grouper = plugins.get('group_rules')
+        rules = grouper.get_project_rules(project)
+        for rule in rules:
+            group_name = rule['group_name']
+            culprit_match, message_match = rule['culprit'], rule['message']
+            if re.search(culprit, culprit) and re.search(message, message):
+                return "group %s" % group_name
+        return None
+
     @transaction.commit_on_success
     def from_kwargs(self, project, **kwargs):
         # TODO: this function is way too damn long and needs refactored
@@ -425,6 +454,12 @@ class GroupManager(BaseManager, ChartMixin):
             'message': message,
         }
 
+        try:
+            group_name = self._get_group_name_by_grouping(project, message=message, culprit=culprit)
+            kwargs['message'] = group_name or kwargs['message']
+        except:
+            group_name = None
+
         event = Event(
             project=project,
             event_id=event_id,
@@ -453,6 +488,20 @@ class GroupManager(BaseManager, ChartMixin):
         })
 
         views = self._get_views(event)
+
+        if group_name is not None:
+            views = self._get_group_view(group_name)
+            try:
+                group = self.get(
+                    grouping_ref=group_name
+                )
+                logger.warning('found an existing grouped group!')
+                event.culprit = group.culprit
+                event.checksum = group.checksum
+                event.logger = group.logger
+            except:
+                pass
+            event.grouping_ref = group_name
 
         try:
             group, is_new, is_sample = self._create_group(event, tags=tags, **group_kwargs)
@@ -511,6 +560,7 @@ class GroupManager(BaseManager, ChartMixin):
                 culprit=event.culprit,
                 logger=event.logger,
                 checksum=event.checksum,
+                grouping_ref=event.grouping_ref,
                 defaults=kwargs
             )
         except self.model.MultipleObjectsReturned:
@@ -520,6 +570,7 @@ class GroupManager(BaseManager, ChartMixin):
                 culprit=event.culprit,
                 logger=event.logger,
                 checksum=event.checksum,
+                grouping_ref=event.grouping_ref,
             ))
             for g in groups[1:]:
                 g.delete()

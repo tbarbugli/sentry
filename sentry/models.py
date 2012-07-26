@@ -400,11 +400,12 @@ class Group(MessageBase):
     score = models.IntegerField(default=0)
     views = models.ManyToManyField(View, blank=True)
     is_public = models.NullBooleanField(default=False, null=True)
+    grouping_ref = models.CharField(max_length=200, blank=True, null=True, db_column='grouping_ref')
 
     objects = GroupManager()
 
     class Meta:
-        unique_together = (('project', 'logger', 'culprit', 'checksum'),)
+        unique_together = (('project', 'logger', 'culprit', 'checksum', 'grouping_ref'),)
         verbose_name_plural = _('grouped messages')
         verbose_name = _('grouped message')
         permissions = (
