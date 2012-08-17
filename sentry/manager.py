@@ -489,12 +489,14 @@ class GroupManager(BaseManager, ChartMixin):
 
         views = self._get_views(event)
 
+        group_exists = False
         if group_name is not None:
             views = self._get_group_view(group_name)
             try:
                 group = self.get(
                     grouping_ref=group_name
                 )
+                group_exists = True
                 logger.warning('found an existing grouped group!')
                 event.culprit = group.culprit
                 event.checksum = group.checksum
@@ -513,6 +515,12 @@ class GroupManager(BaseManager, ChartMixin):
                 warnings.warn(u'Unable to process log entry: %s', exc)
 
             return
+
+        if group_name is not None and not group_exists:
+            group.update(
+                message=group_name,
+                grouping_ref=group_name
+            )
 
         event.group = group
 
